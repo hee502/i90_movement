@@ -8,7 +8,7 @@
   <license>BSD</license>
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/i90_movement</url>
-
+  <depend package="roscpp"/>
 </package>
 
 
