@@ -1,10 +1,10 @@
 ///////////////////////////////////////////////////////////////////////////////
 //Source for i90_movement node to send movement commands to i90							 //
 //v1.5 																																			 //
-//Based on:																																	 //
-//v1.4																																			 //
 //Changelog:																																 //
+//-3 step movement added (go 20 cm forward, turn, go 50 cm forward)				   //
 //-Internal IRs cancelled
+//-Step numbers added
 //ToDo:																																			 //
 //-Add movement with 3 steps																								 //
 //Huseyin Emre Erdem 																												 //
@@ -53,6 +53,7 @@ volatile bool bTurnDir;//0:CW, 1:CCW
 i90_movement::UInt8 iRotationFlag;//Flag to be used in rotationPub
 i90_movement::UInt8 iTranslationFlag;//Flag to be used in translationPub
 geometry_msgs::Twist cmdvel_;//commands to be sent to i90
+int iCounter = 0;
 
 /*Prototypes*/
 void turnToTargetPos(const i90_movement::pos posReceived);//Turns i90 to target position
@@ -110,7 +111,6 @@ int main(int argc, char **argv)
 		if(bTurnState == true){
 			usleep(1000000);//Wait to allow position estimation performed
 			moveToTargetPos();
-			ROS_INFO("Translation Duration: %d", duration);
 			cmdvel_.linear.x = SPEED;
 			velPub.publish(cmdvel_);//Send movement command to i90
 			usleep(duration);
@@ -118,6 +118,7 @@ int main(int argc, char **argv)
 			velPub.publish(cmdvel_);
 			usleep(1000000);//Wait to allow robot to physically stop
 			translationPub.publish(iTranslationFlag);//Inform other nodes to estimate the new position
+			iCounter++;
 		}
 
 		ros::spinOnce();
@@ -131,7 +132,7 @@ void turnToTargetPos(const i90_movement::pos posReceived){
 	fTargetPosX = posReceived.fXPos; //Get target position in 'x' axis from i90_sensor_board
 	fTargetPosY = posReceived.fYPos; //Get target position in 'y' axis from i90_sensor_board
 	fTargetAngleYaw = posReceived.fYawAngle;//Get target angle
-	ROS_INFO("Received target: %f\t%f\t%f", fTargetPosX, fTargetPosY, fTargetAngleYaw);
+	ROS_INFO("-%d- Received target: %f\t%f\t%f", iCounter, fTargetPosX, fTargetPosY, fTargetAngleYaw);
 
 	fAngle = fCurrentAngleYaw - fTargetAngleYaw;
 	if(fAngle < 0.00){
@@ -155,7 +156,7 @@ void turnToTargetPos(const i90_movement::pos posReceived){
 	}
 
 	duration = fAngle / 90.00 * DURTURN;//90.00 degrees ~= 2500000 uSeconds	with SPEED angular x speed	
-	ROS_INFO("Angle difference: %f\t%d", fAngle, bTurnDir);
+	ROS_INFO("-%d- Angle difference: %f\t%d", iCounter, fAngle, bTurnDir);
 	iRotationFlag.data = 1;//Allow sending turn commands to the robot
 
 	bTurnState = true;
@@ -166,7 +167,7 @@ void moveToTargetPos(void){
 	fDistance = sqrt(pow(fTargetPosX-fCurrentPosX,2)+pow(fTargetPosY-fCurrentPosY,2)); //Calculate distance in meters between target and current positions
 	iDistancePulses = int (fDistance / 0.00066); //Culculate quantity of encoder's pulses to reach that distance
 
-	ROS_INFO("Distance to translate: %f", fDistance);
+	ROS_INFO("-%d- Distance to translate: %f", iCounter, fDistance);
 	iTargetPulseL = iCurrentPulseL + iDistancePulses;
 	if(iTargetPulseL >= MAXENCODER) iTargetPulseL = iTargetPulseL - MAXENCODER;
 	iTargetPulseR = iCurrentPulseR + iDistancePulses;
