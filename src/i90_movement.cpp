@@ -1,16 +1,16 @@
 ///////////////////////////////////////////////////////////////////////////////
 //Source for i90_movement node to send movement commands to i90							 //
 //v2.6 																																			 //
-//-Visualization for obstacle with proper sensors is added
+//-Missing comments added.																									 //
 //Huseyin Emre Erdem 																												 //
 //29.08.2014 																																 //
 ///////////////////////////////////////////////////////////////////////////////
 
-/*This node makes i90 go to the target position information published from i90_sensor node
-under i90_target_pos topic. The type of message published is i90_movement::pos.
+/*This node makes i90 go to the target position published from i90_sensor_board 
+node under i90_target_pos topic. The type of message published is i90_movement::pos.
 After acquiring the target, it moves 20 cm forward to make the center of the robot
-and the sensors equal, turns and goes to the target. Informs other nodes upon
-competion.*/
+and the sensors equal, turns and goes towards the target. Informs other nodes upon
+competion for position estimation.*/
 
 #include "ros/ros.h"
 #include "pos.h"//position information
@@ -49,7 +49,7 @@ volatile int iDistancePulses;//Amount of pulses to move to correct position
 volatile int iActionSteps;//1:Only turn, 3:Move, Turn, Move
 volatile int iActionStepNum;//Current action step number
 volatile bool bTurnState;//Shows if the turning before straight movement is done or not, 0:not 1:done
-volatile bool bMoveState;
+volatile bool bMoveState;//Shows if movement is done or not
 volatile bool bTurnDir;//0:CW, 1:CCW
 int iCounter = 0;//Step counter
 volatile uint64_t iDurationAct1;//Duration to give motor control orders to limit the movement amount
@@ -57,14 +57,14 @@ volatile uint64_t iDurationAct2;//Duration to give motor control orders to limit
 volatile uint64_t iDurationAct3;//Duration to give motor control orders to limit the movement amount
 volatile uint64_t iNDiff;//Time difference in nanoseconds
 volatile float fSonar[3];//0:Left, 1:Right
-bool bObstacleDuringTurn = false;
+bool bObstacleDuringTurn = false;//if obstacle is present during turn
+volatile bool bObstructedBeforeTurn = false;//if obstacle is present before turn
 float fStopDistance[3] = {0.25, 0.3, 0.25};//Distances to stop before an obstacle for 3 internal sonars
-volatile bool bObstructedBeforeTurn = false;
 volatile int iTurnDirPerformed;//0:CW, 1:CCW
-volatile int iObstacleNum = 0;
-uint32_t shape = visualization_msgs::Marker::CUBE;
+volatile int iObstacleNum = 0;//The number of obstacle visualized
+uint32_t shape = visualization_msgs::Marker::CUBE;//obstacle type to be visualized
 float fSonarAngle[3] = {20.00, 0.00, -20.00};//Angles of sonar sensors
-volatile bool bVisualization = false;
+volatile bool bVisualization = false;//Flag to publishment for visualization
 
 /*Objects*/
 i90_movement::UInt8 iFlag;//Message to be sent when pos est. is required after rotation
@@ -72,11 +72,11 @@ geometry_msgs::Twist cmdvel_;//commands to be sent to i90
 
 /*Prototypes*/
 void action1(const i90_movement::pos posReceived);//Turns i90 to target position
-uint64_t calcRotationDur(float fCurrentAngle, float fTargetAngle);
-uint64_t calcTranslationDur(float fCurrentX, float fCurrentY, float fTargetX, float fTargetY);
+uint64_t calcRotationDur(float fCurrentAngle, float fTargetAngle);//Calculates the required duration for rotation
+uint64_t calcTranslationDur(float fCurrentX, float fCurrentY, float fTargetX, float fTargetY);//Calculates the required duration for translation*/
 void getCurrentPos(const i90_movement::pos posReceived);//Processes data read from i90_current_pos topic
 void getEncoderPulses(const drrobot_I90_player::MotorInfoArray MotorInfoArray);//Processes data read from drrobot_motor topic
-void getSonarValues(const drrobot_I90_player::RangeArray sonarValues);
+void getSonarValues(const drrobot_I90_player::RangeArray sonarValues);//Reads internal ultrasonic sensors
 
 /*Main function*/
 int main(int argc, char **argv)
@@ -88,17 +88,16 @@ int main(int argc, char **argv)
 	ros::Subscriber targetSub = n.subscribe("i90_target_pos", 1, action1);//To read target positions
 	ros::Subscriber currentSub = n.subscribe("i90_current_pos", 1, getCurrentPos);//To read current estimated position
 	ros::Subscriber encoderSub = n.subscribe("drrobot_motor", 1, getEncoderPulses);//To read encoder values
-	ros::Subscriber sonarSub = n.subscribe("drrobot_sonar", 1, getSonarValues);
+	ros::Subscriber sonarSub = n.subscribe("drrobot_sonar", 1, getSonarValues);//To read internal sonars
 	ros::Publisher velPub = n.advertise<geometry_msgs::Twist>("drrobot_cmd_vel", 1);//To publish movement commands
 	ros::Publisher rotationPub = n.advertise<i90_movement::UInt8>("i90_rotation_done",1);//To publish flags indicating rotation is done (to update yaw angle)
 	ros::Publisher translationPub = n.advertise<i90_movement::UInt8>("i90_translation_done",1);//To publish flags indicating movement is done (to update position)
 	ros::Publisher positionPub = n.advertise<i90_movement::UInt8>("i90_movement_done",1);//Send message to i90_position node to publish the estimated position
-	ros::Publisher turnDirPub = n.advertise<i90_movement::UInt8>("i90_turn_dir",1);
-	ros::Publisher markerPub = n.advertise<visualization_msgs::Marker>("visualization_marker",10);
+	ros::Publisher turnDirPub = n.advertise<i90_movement::UInt8>("i90_turn_dir",1);//To publish flag after a rotation is performed
+	ros::Publisher markerPub = n.advertise<visualization_msgs::Marker>("visualization_marker",10);//To publish obstacles for visualization
 
 	ros::Duration d = ros::Duration(2,0);
 	ros::Rate loop_rate(50);//50 Hz
-	ros::Duration diff;
 	iFlag.data = 1;
 	bMoveState = false;
 	bTurnState = false;
@@ -106,6 +105,7 @@ int main(int argc, char **argv)
 	iActionStepNum = 0;
 	ros::Time start;
 	ros::Time now;
+	ros::Duration diff;
 
 	while (ros::ok()){
 		bObstacleDuringTurn = false;
@@ -114,6 +114,7 @@ int main(int argc, char **argv)
 		if(bVisualization == true){
 			for(int i=0;i<3;i++){
 				if(fSonar[i] < 2.0){
+					/*Set visualization parameters*/
 					visualization_msgs::Marker marker;
 					marker.header.frame_id = "/my_frame";
 					marker.header.stamp = ros::Time::now();
@@ -143,17 +144,15 @@ int main(int argc, char **argv)
 			bVisualization = false;
 		}
 
-		/*3 actions required to reach the target*/
-		/*Go 0.2m forwards*/
+		/*3 actions required to reach the target, go 0.2m forwards*/
 		if(iActionSteps == 3 && iActionStepNum == 1){
 			if(bMoveState == false){//If movement not performed yet
-				//printf("ACTION1 IS ACTIVE\n\r");
-				cmdvel_.linear.x = SPEED;
+				cmdvel_.linear.x = SPEED;//Set speed
 				cmdvel_.angular.z = 0.0;
 				iNDiff = 0;
 				velPub.publish(cmdvel_);
 				start = ros::Time::now();
-				while(iNDiff < iDurationAct1){
+				while(iNDiff < iDurationAct1){//Don't stop until reaching the duration
 					ros::spinOnce();
 					if(fSonar[0] > fStopDistance[0] && fSonar[1] > fStopDistance[1] && fSonar[2] > fStopDistance[2]){//If no obstacle is in range keep moving
 						now = ros::Time::now();
@@ -161,11 +160,10 @@ int main(int argc, char **argv)
 						iNDiff = diff.toNSec();
 					}
 					else{//Otherwise stop
-						//printf("Obstacle during action1\n\r");
 						break;
 					}
 				}
-				cmdvel_.linear.x = 0.0;
+				cmdvel_.linear.x = 0.0;//Reset speed
 				velPub.publish(cmdvel_);
 				usleep(WAITSHORT);//Wait for drone to physically stop and publish up-to-date encoder values
 				translationPub.publish(iFlag);//Enable position estimation update after translation
@@ -181,7 +179,6 @@ int main(int argc, char **argv)
 		/*Turn to target*/
 		if(iActionSteps == 3 && iActionStepNum == 2){
 			if(bTurnState == false){//Rotation not performed yet
-				//printf("ACTION2 IS ACTIVE\n\r");
 
 				if(bTurnDir == 0){//CW
 					cmdvel_.angular.z = -SPEED;
@@ -191,7 +188,6 @@ int main(int argc, char **argv)
 					/*If not obstructed before. Turn until seeing an obstacle*/
 					ros::spinOnce();//Update sensors
 					if(fSonar[0] > fStopDistance[0] && fSonar[2] > fStopDistance[2]){
-						//printf("Not obstructed before.\n\r");
 						iNDiff = 0;
 						velPub.publish(cmdvel_);
 						start = ros::Time::now();
@@ -206,7 +202,6 @@ int main(int argc, char **argv)
 
 						/*If stopped because of an obstacle on the right, turn CCW to prevent it*/
 						if(fSonar[2] <= fStopDistance[2]){
-							//printf("Obstacle on the right. Turning back.\n\r");
 							cmdvel_.angular.z = SPEED;
 							velPub.publish(cmdvel_);
 							start = ros::Time::now();
@@ -227,7 +222,6 @@ int main(int argc, char **argv)
 
 					/*Obstructed before. Turn up to 90 degrees if obstacle is not eliminated*/
 					else{
-						//printf("Obstructed before.\n\r");
 						/*Turn until reaching the angle or finding an unobstructed view*/
 						bool bUnobstructedView = false;
 						if(fSonar[0] <= fStopDistance[0] && fSonar[2] > fStopDistance[2]){//Left is obstructed, turn right
@@ -260,7 +254,7 @@ int main(int argc, char **argv)
 								iNDiff = diff.toNSec();
 							}
 						}
-						if(fSonar[1] <= fStopDistance[1]/* && fSonar[2] <= fStopDistance[2]*/){//Both sides are obstructed, turn in the way with further distance to the obstacle
+						if(fSonar[1] <= fStopDistance[1]){//Both sides are obstructed, turn in the way with further distance to the obstacle
 							if(fSonar[0] > fSonar[2]){//Turn CCW
 								iNDiff = 0;
 								cmdvel_.angular.z = SPEED;
@@ -315,8 +309,6 @@ int main(int argc, char **argv)
 
 						/*If still obstructed turn up to 90 degrees*/
 						if(bUnobstructedView == false){
-							//printf("Obstacle still there. More turn is needed.\n\r");
-							//Turn up to 90 degrees
 						}
 					}
 				}
@@ -328,7 +320,6 @@ int main(int argc, char **argv)
 					/*Not obstructed before. Turn until seeing an obstacle*/
 					ros::spinOnce();//Update sensors
 					if(fSonar[0] > fStopDistance[0] && fSonar[2] > fStopDistance[2]){
-						//printf("Not obstructed before.\n\r");
 						iNDiff = 0;
 						velPub.publish(cmdvel_);
 						start = ros::Time::now();
@@ -342,7 +333,6 @@ int main(int argc, char **argv)
 						velPub.publish(cmdvel_);
 
 						/*If stopped because of an obstacle on the left, turn CW to prevent it*/
-						//printf("Obstacle on the left. Turning back.\n\r");
 						if(fSonar[0] <= fStopDistance[0]){
 							cmdvel_.angular.z = -SPEED;
 							velPub.publish(cmdvel_);
@@ -365,7 +355,6 @@ int main(int argc, char **argv)
 
 					/*Obstructed before. Turn up to 90 degrees if obstacle is not eliminated*/
 					else{
-						//printf("Obstructed before.\n\r");
 						/*Turn until reaching the angle or finding an unobstructed view*/
 						bool bUnobstructedView = false;
 						if(fSonar[0] <= fStopDistance[0] && fSonar[2] > fStopDistance[2]){//Left is obstructed, turn right
@@ -398,7 +387,7 @@ int main(int argc, char **argv)
 								iNDiff = diff.toNSec();
 							}
 						}
-						if(fSonar[1] <= fStopDistance[1] /*&& fSonar[2] <= fStopDistance[2]*/){//Both sides are obstructed, turn in the way with further distance to the obstacle
+						if(fSonar[1] <= fStopDistance[1]){//Both sides are obstructed, turn in the way with further distance to the obstacle
 							if(fSonar[0] > fSonar[2]){//Turn CCW
 								iNDiff = 0;
 								cmdvel_.angular.z = SPEED;
@@ -441,7 +430,6 @@ int main(int argc, char **argv)
 						/*If still obstructed turn up to 90 degrees*/
 						if(bUnobstructedView == true){
 							printf("Obstacle still there. More turn is needed.\n\r");
-							//Turn up to 90 degrees
 						}
 					}
 				}
@@ -583,7 +571,7 @@ int main(int argc, char **argv)
 								iNDiff = diff.toNSec();
 							}
 						}
-						if(fSonar[1] <= fStopDistance[1] /*&& fSonar[2] <= fStopDistance[2]*/){//Both sides are obstructed, turn in the way with further distance to the obstacle
+						if(fSonar[1] <= fStopDistance[1]){//Both sides are obstructed, turn in the way with further distance to the obstacle
 							if(fSonar[0] > fSonar[2]){//Turn CCW
 								iNDiff = 0;
 								cmdvel_.angular.z = SPEED;
@@ -619,6 +607,7 @@ int main(int argc, char **argv)
 								}								
 							}
 						}
+
 						/*Only center is obstructed with a small object (pole)*/
 						if(fSonar[0] > fStopDistance[0] && fSonar[1] <= fStopDistance[1] && fSonar[2] > fStopDistance[2]){
 							iNDiff = 0;
@@ -721,7 +710,7 @@ int main(int argc, char **argv)
 								iNDiff = diff.toNSec();
 							}
 						}
-						if(fSonar[1] <= fStopDistance[1] /*&& fSonar[2] <= fStopDistance[2]*/){//Both sides are obstructed, turn in the way with further distance to the obstacle
+						if(fSonar[1] <= fStopDistance[1]){//Both sides are obstructed, turn in the way with further distance to the obstacle
 							if(fSonar[0] > fSonar[2]){//Turn CCW
 								iNDiff = 0;
 								cmdvel_.angular.z = SPEED;
@@ -801,7 +790,6 @@ void action1(const i90_movement::pos posReceived){
 	fTargetPosX = posReceived.fXPos; //Get target position in 'x' axis from i90_sensor_board
 	fTargetPosY = posReceived.fYPos; //Get target position in 'y' axis from i90_sensor_board
 	fTargetAngleYaw = posReceived.fYawAngle;//Get target angle
-	printf("\n\r-%d- Received target: %f\t%f\t%f\n\r", iCounter, fTargetPosX, fTargetPosY, fTargetAngleYaw);
 
 	/*Calculate the distance to see if going forward is necessary*/
 	if(fTargetPosX != fCurrentPosX){//Move, turn, move required
@@ -876,6 +864,5 @@ void getSonarValues(const drrobot_I90_player::RangeArray sonarValues){
 	fSonar[0] = sonarValues.ranges[0].range;//Left sonar
 	fSonar[1] = sonarValues.ranges[1].range;//Left sonar
 	fSonar[2] = sonarValues.ranges[2].range;//Right sonar
-	//printf("Sonars: %f\t%f\t%f\n\r", fSonar[0], fSonar[1], fSonar[2]);
 }
 
